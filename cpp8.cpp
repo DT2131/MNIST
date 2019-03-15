@@ -21,6 +21,7 @@ typedef struct hiddenLayer {
 
 	//	initialization
 
+	hiddenLayer() {}
 	hiddenLayer(string _layerType, string _activationFunction, int _neuronNumber, double _learningRate) {
 		layerType = _layerType;
 		activationFunction = _activationFunction;
@@ -31,7 +32,7 @@ typedef struct hiddenLayer {
 
 	//	activation functions
 
-	void active(int _leak) {
+	void active(int _leak = 0.1) {
 		if (activationFunction == "sigmoid") {
 			for (int i = 0; i < neuronNumber; i++) {
 				neuronsValue[i] = 1.0 / (1.0 + exp(-neuronsAfterActive[i]));
@@ -59,7 +60,6 @@ typedef struct outputLayer {
 	string classifier;
 	vector <double> neuronsAfterClassify;
 	vector <double> neuronsValue;
-	double learningRate;
 	vector <double> lossValue;
 	double lossSum;
 	double answer;
@@ -71,11 +71,10 @@ typedef struct outputLayer {
 
 	//	initialization
 
-	outputLayer(string _lossFunction, string _classifier, int _neuronNumber, double _learningRate) {
+	outputLayer() {}
+	outputLayer(string _lossFunction, string _classifier) {
 		lossFunction = _lossFunction;
 		classifier = _classifier;
-		neuronNumber = _neuronNumber;
-		learningRate = _learningRate;
 	}
 
 	//	calculate loss
@@ -120,11 +119,12 @@ typedef struct outputLayer {
 				if (i >= (neuronNumber - neuronNumber * 0.1)) {
 					Top1Accuracy = 1;
 				}
-				else if (i >= (neuronNumber - neuronNumber * 0.3)) {
+				if (i >= (neuronNumber - neuronNumber * 0.3)) {
 					Top3Accuracy = 1;
 				}
-				else if (i >= (neuronNumber - neuronNumber * 0.5)) {
+				if (i >= (neuronNumber - neuronNumber * 0.5)) {
 					Top5Accuracy = 1;
+					break;
 				}
 			}
 		}
@@ -156,6 +156,7 @@ typedef struct inputLayer {
 	
 	//	initialization
 
+	inputLayer() {}
 	inputLayer(int _neuronNumber) {
 		neuronNumber = _neuronNumber;
 	}
@@ -179,14 +180,15 @@ typedef struct batch {
 	double batchTop5Accuracy;
 	double batchLoss;
 	bool batchShift;
-	int batchPosition;
+	int simpleId;
 	//	initialization
 
+	batch() {}
 	batch(int _batchNumber, int _batchSize, bool _batchShift = 0) {
 		batchNumber = _batchNumber;
 		batchSize = _batchSize;
 		batchShift = _batchShift;
-		batchPosition = 0;
+		simpleId = 0;
 	}
 
 	void accuracy(outputLayer& output) {
@@ -254,7 +256,6 @@ typedef struct model {
 	outputLayer outputLayer;
 
 	//	initialization
-
 	void ini() {
 		for (int i = 0; i < inputLayer.neuronNumber; i++) {
 			inputLayer.neuronsValue.push_back(0);
@@ -281,6 +282,7 @@ typedef struct model {
 				}
 			}
 		}
+		outputLayer.neuronNumber = hiddenLayers[hiddenLayers.size() - 1].neuronNumber;
 		for (int i = 0; i < outputLayer.neuronNumber; i++) {
 			outputLayer.neuronsValue.push_back(0);
 			outputLayer.neuronsAfterClassify.push_back(0);
@@ -343,31 +345,77 @@ typedef struct model {
 
 	//	train
 
-	void train(batch& batch) {
-
+	void train(dataSet& data, batch& batch) {
 		for (int i = 0; i < batch.batchNumber; i++) {
-			for (int j = 0; j < batch.batchSize; j++) {
-				
-				if (batch.batchShift) {
-					
+			if (batch.batchShift) {
+				srand((unsigned)time(NULL));
+				batch.simpleId = rand();
+			}
+			for (int j = 0; j < batch.batchSize; j++, batch.simpleId++) {
+				fill_data(data, batch.simpleId);
+
+				//	forward propagation
+
+				//	hiddenlayer foward
+
+				for (int k = 0; k < hiddenLayers.size(); k++) {
+					if (hiddenLayers[k].layerType == "fullconnect") {
+						if (k == 0) {
+							for (int u = 0; u < inputLayer.neuronNumber; u++) {
+								for (int v = 0; v < hiddenLayers[k].neuronNumber; v++) {
+									hiddenLayers[k].neuronsAfterActive[v] += inputLayer.neuronsValue[u] * hiddenLayers[k].weights[u * hiddenLayers[k].neuronNumber + v];
+								}
+							}
+							for (int u = 0; u < hiddenLayers[k].neuronNumber; u++) {
+								hiddenLayers[k].neuronsAfterActive[u] += hiddenLayers[k].bias[u];
+							}
+						}
+						else {
+							for (int u = 0; u < hiddenLayers[k - 1].neuronNumber; u++) {
+								for (int v = 0; v < hiddenLayers[k].neuronNumber; v++) {
+									hiddenLayers[k].neuronsAfterActive[v] += hiddenLayers[k - 1].neuronsValue[u] * hiddenLayers[k].weights[u * hiddenLayers[k].neuronNumber + v];
+								}
+							}
+							for (int u = 0; u < hiddenLayers[k].neuronNumber; u++) {
+								hiddenLayers[k].neuronsAfterActive[u] += hiddenLayers[k].bias[u];
+							}
+						}
+					}
+					else {
+						//	......
+					}
+					hiddenLayers[k].active();
 				}
+
+				//	outputlayer forward
+
+				for (int u = 0; u < outputLayer.neuronNumber; u++) {
+					outputLayer.neuronsAfterClassify[u] = hiddenLayers[hiddenLayers.size() - 1].neuronsValue[u];
+				}
+
+				//	calculate loss
+
+				outputLayer.classify();
+				outputLayer.loss();
+				outputLayer.accracy();
+				batch.accuracy += outputLayer.accracy;
+				batch.batchTop1Accuracy += outputLayer.Top1Accuracy;
+				batch.batchTop3Accuracy += outputLayer.Top3Accuracy;
+				batch.batchTop5Accuracy += outputLayer.Top5Accuracy;
+
+
+				//	back propagation
+
+
+				
 			}
 		}
 
-		//	forward propagation
-
-
-		//	calculate loss
-
-
-		//	back propagation
 
 	}
 };
 
-dataSet mnist;
-model myModel;
-batch myBatch;
+
 void buildModel(model& model) {
 	model.inputLayer = {
 		784
@@ -378,11 +426,15 @@ void buildModel(model& model) {
 		16,
 		0.1
 		});
-	model.outputLayer = {
-		"crossEntropy",
-		"softmax",
+	model.hiddenLayers.push_back({
+		"fullconnect",
+		"sigmoid",
 		10,
 		0.1
+		});
+	model.outputLayer = {
+		"crossEntropy",
+		"softmax"
 	};
 }
 void buildBatch(batch& batch) {
@@ -392,6 +444,9 @@ void buildBatch(batch& batch) {
 		1
 	};
 }
+dataSet mnist;
+model myModel;
+batch myBatch;
 int main()
 {
 	mnist.MNISTInput();
@@ -399,5 +454,5 @@ int main()
 	buildBatch(myBatch);
 	myModel.ini();
 	myModel.normalWB(0, 1);
-	myModel.train(myBatch);
+	myModel.train(mnist, myBatch);
 }
