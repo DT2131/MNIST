@@ -3,7 +3,7 @@
 #include <conio.h>
 using namespace std;
 
-typedef struct hiddenLayer {
+typedef struct HiddenLayer {
 
 	//	data structure
 
@@ -14,15 +14,16 @@ typedef struct hiddenLayer {
 	vector <double> neuronsAfterActive;
 	vector <double> bias;
 	vector <double> neuronsValue;
-	vector <double> gradient;
+	vector <double> lossValue;
+	vector <double> gradientsValue;
 	double learningRate;
 	vector <double> weightsadjust;
 	vector <double> biasadjust;
 
 	//	initialization
 
-	hiddenLayer() {}
-	hiddenLayer(string _layerType, string _activationFunction, int _neuronNumber, double _learningRate) {
+	HiddenLayer() {}
+	HiddenLayer(string _layerType, string _activationFunction, int _neuronNumber, double _learningRate) {
 		layerType = _layerType;
 		activationFunction = _activationFunction;
 		neuronNumber = _neuronNumber;
@@ -54,14 +55,15 @@ typedef struct hiddenLayer {
 	}
 };
 
-typedef struct outputLayer {
+typedef struct OutputLayer {
 	int neuronNumber;
 	string lossFunction;
 	string classifier;
 	vector <double> neuronsAfterClassify;
 	vector <double> neuronsValue;
 	vector <double> lossValue;
-	double lossSum;
+	vector <double> gradientsValue;
+	double costSum;
 	double answer;
 	vector <double> answerVector;
 	double Accuracy;
@@ -71,32 +73,10 @@ typedef struct outputLayer {
 
 	//	initialization
 
-	outputLayer() {}
-	outputLayer(string _lossFunction, string _classifier) {
+	OutputLayer() {}
+	OutputLayer(string _lossFunction, string _classifier) {
 		lossFunction = _lossFunction;
 		classifier = _classifier;
-	}
-
-	//	calculate loss
-
-	void loss() {
-		lossSum = 0;
-		if (lossFunction == "squaredError") {
-			for (int i = 0; i < neuronNumber; i++) {
-				lossValue[i] = 2 * (neuronsValue[i] - answerVector[i]);
-			}
-		}
-		else if (lossFunction=="crossEntropy") {
-			for (int i = 0; i < neuronNumber; i++) {
-				lossValue[i] = -answerVector[i] * log(neuronsValue[i]);
-			}
-		}
-		else {
-			//	......
-		}
-		for (int i = 0; i < neuronNumber; i++) {
-			lossSum += lossValue[i];
-		}
 	}
 
 	//	calculate accracy
@@ -149,15 +129,15 @@ typedef struct outputLayer {
 	}
 };
 
-typedef struct inputLayer {
+typedef struct InputLayer {
 	int neuronNumber;
 	vector <double> neuronsValue;
 	vector <double> neuronsAfterNormalize;
 	
 	//	initialization
 
-	inputLayer() {}
-	inputLayer(int _neuronNumber) {
+	InputLayer() {}
+	InputLayer(int _neuronNumber) {
 		neuronNumber = _neuronNumber;
 	}
 
@@ -171,27 +151,30 @@ typedef struct inputLayer {
 
 };
 
-typedef struct batch {
+typedef struct Batch {
 	int batchSize;
 	int batchNumber;
+	vector <vector<double> >weightsadjust;
+	vector <vector<double> >biasadjust;
 	double batchAccuracy;
 	double batchTop1Accuracy;
 	double batchTop3Accuracy;
 	double batchTop5Accuracy;
-	double batchLoss;
+	double batchCost;
 	bool batchShift;
 	int simpleId;
 	//	initialization
 
-	batch() {}
-	batch(int _batchNumber, int _batchSize, bool _batchShift = 0) {
+	Batch() {}
+	Batch(int _batchNumber, int _batchSize, bool _batchShift = 0) {
 		batchNumber = _batchNumber;
 		batchSize = _batchSize;
 		batchShift = _batchShift;
 		simpleId = 0;
 	}
 
-	void accuracy(outputLayer& output) {
+	void accuracy(OutputLayer& output) {
+		batchCost += output.costSum;
 		batchAccuracy += output.Accuracy;
 		batchTop1Accuracy += output.Top1Accuracy;
 		batchTop3Accuracy += output.Top3Accuracy;
@@ -200,7 +183,7 @@ typedef struct batch {
 
 };
 
-typedef struct dataSet {
+typedef struct DataSet {
 	int number;
 	int dimonsion;
 	int checker;
@@ -222,9 +205,9 @@ typedef struct dataSet {
 		return ans;
 	}
 
-	void MNISTInput() {
+	void MNISTInput(const char dataDir[],const char labelsDir[]) {
 		ifstream icin;
-		icin.open("train-images.idx3-ubyte", ios::binary);
+		icin.open(dataDir, ios::binary);
 		dimonsion = 2;
 		checker = in(icin, 4), number = in(icin, 4), size.push_back(in(icin, 4)), size.push_back(in(icin, 4));
 		for (int i = 0; i < number; i++) {
@@ -236,7 +219,7 @@ typedef struct dataSet {
 		}
 		singleDataSize = data.size() / number;
 		icin.close();
-		icin.open("train-labels.idx1-ubyte", ios::binary);
+		icin.open(labelsDir, ios::binary);
 		checker = in(icin, 4), number = in(icin, 4);
 		for (int i = 0; i < number; i++) {
 			int temp = in(icin, 1);
@@ -249,36 +232,43 @@ typedef struct dataSet {
 	}
 };
 
-typedef struct model {
+typedef struct Model {
 
-	inputLayer inputLayer;
-	vector <hiddenLayer> hiddenLayers;
-	outputLayer outputLayer;
-
+	InputLayer inputLayer;
+	vector <HiddenLayer> hiddenLayers;
+	OutputLayer outputLayer;
+	Batch batch;
 	//	initialization
+
 	void ini() {
 		for (int i = 0; i < inputLayer.neuronNumber; i++) {
 			inputLayer.neuronsValue.push_back(0);
 			inputLayer.neuronsAfterNormalize.push_back(0);
 		}
+		batch.weightsadjust.resize(hiddenLayers.size());
+		batch.biasadjust.resize(hiddenLayers.size());
 		for (int i = 0; i < hiddenLayers.size(); i++) {
 			for (int j = 0; j < hiddenLayers[i].neuronNumber; j++) {
 				hiddenLayers[i].neuronsValue.push_back(0);
 				hiddenLayers[i].neuronsAfterActive.push_back(0);
 				hiddenLayers[i].bias.push_back(0);
 				hiddenLayers[i].biasadjust.push_back(0);
-				hiddenLayers[i].gradient.push_back(0);
+				hiddenLayers[i].gradientsValue.push_back(0);
+				hiddenLayers[i].lossValue.push_back(0);
+				batch.biasadjust[i].push_back(0);
 			}
 			if (i == 0) {
 				for (int j = 0; j < hiddenLayers[i].neuronNumber*inputLayer.neuronNumber; j++) {
 					hiddenLayers[i].weights.push_back(0);
 					hiddenLayers[i].weightsadjust.push_back(0);
+					batch.weightsadjust[i].push_back(0);
 				}
 			}
 			else {
 				for (int j = 0; j < hiddenLayers[i].neuronNumber*hiddenLayers[i - 1].neuronNumber; j++) {
 					hiddenLayers[i].weights.push_back(0);
 					hiddenLayers[i].weightsadjust.push_back(0);
+					batch.weightsadjust[i].push_back(0);
 				}
 			}
 		}
@@ -288,15 +278,16 @@ typedef struct model {
 			outputLayer.neuronsAfterClassify.push_back(0);
 			outputLayer.answerVector.push_back(0);
 			outputLayer.lossValue.push_back(0);
+			outputLayer.gradientsValue.push_back(0);
 		}
 	}
 
 	//	data input
 
-	void fill_data(dataSet& data, int id) {
+	void fill_data(DataSet& data, int id) {
 		
 		for (int i = 0; i < data.singleDataSize; i++) {
-			inputLayer.neuronsValue[i] = data.data[id * data.singleDataSize + i];
+			inputLayer.neuronsValue[i] = data.data[id * data.singleDataSize + i] / 255;
 		}
 		outputLayer.answer = data.labels[id];
 		for (int i = 0; i < outputLayer.neuronNumber; i++) {
@@ -342,20 +333,139 @@ typedef struct model {
 		freopen(a, "w", stdout);
 
 	}
+	//	calculate gradient
+
+	void gradient() {
+		
+		//	outputlayer
+		//	calculate cost and loss
+		
+		outputLayer.costSum = 0;
+		if (outputLayer.lossFunction == "squaredError") {
+			for (int i = 0; i < outputLayer.neuronNumber; i++) {
+				outputLayer.costSum += (outputLayer.neuronsValue[i] - outputLayer.answerVector[i]) * (outputLayer.neuronsValue[i] - outputLayer.answerVector[i]);
+				outputLayer.lossValue[i] = 2 * (outputLayer.neuronsValue[i] - outputLayer.answerVector[i]);
+			}
+		}
+		else if (outputLayer.lossFunction == "crossEntropy") {
+			for (int i = 0; i < outputLayer.neuronNumber; i++) {
+				outputLayer.costSum += -outputLayer.answerVector[i] * log(outputLayer.neuronsValue[i]);
+				outputLayer.lossValue[i] = -outputLayer.answerVector[i] / outputLayer.neuronsValue[i];
+			}
+		}
+		else {
+			//	......
+
+		}
+		
+		//	calculate gradient
+
+		if (outputLayer.classifier == "softmax") {
+			for (int i = 0; i < outputLayer.neuronNumber; i++) {
+				outputLayer.gradientsValue[i] = 0;
+				for (int j = 0; j < outputLayer.neuronNumber; j++) {
+					if (i == j) {
+						outputLayer.gradientsValue[i] += outputLayer.neuronsValue[i] * (1 - outputLayer.neuronsValue[i]) * outputLayer.lossValue[i];
+					}
+					else {
+						outputLayer.gradientsValue[i] += (-outputLayer.neuronsValue[j] * outputLayer.neuronsValue[i]) * outputLayer.lossValue[j];
+					}
+				}
+			}
+		}
+		else {
+			//	......
+		}
+
+		//	hiddenlayer
+		
+		for (int i = hiddenLayers.size() - 1; i >= 0; i--) {
+
+			//	calculate loss
+
+			if (i == hiddenLayers.size() - 1) {
+				for (int u = 0; u < hiddenLayers[i].neuronNumber; u++) {
+					hiddenLayers[i].lossValue[u] = outputLayer.gradientsValue[u];
+				}
+			}
+			else {
+				for (int u = 0; u < hiddenLayers[i].neuronNumber; u++) {
+					hiddenLayers[i].lossValue[u] = 0;
+					for (int v = 0; v < hiddenLayers[i + 1].neuronNumber; v++) {
+						hiddenLayers[i].lossValue[u] += hiddenLayers[i + 1].weights[u * hiddenLayers[i + 1].neuronNumber + v] * hiddenLayers[i + 1].gradientsValue[v];
+					}
+				}
+			}
+
+			//	calculate gradient
+
+			if (hiddenLayers[i].activationFunction == "sigmoid") {
+				for (int j = 0; j < hiddenLayers[i].neuronNumber; j++) {
+					hiddenLayers[i].gradientsValue[j] = hiddenLayers[i].neuronsValue[j] * (1 - hiddenLayers[i].neuronsValue[j]) * hiddenLayers[i].lossValue[j];
+				}
+			}
+			else if (hiddenLayers[i].activationFunction == "relu") {
+				//	......
+			}
+			else if (hiddenLayers[i].activationFunction == "prelu") {
+				//	......
+			}
+			else {
+				//	......
+			}
+			
+		}
+	}
+
+
 
 	//	train
 
-	void train(dataSet& data, batch& batch) {
+	void train(DataSet& data) {
 		for (int i = 0; i < batch.batchNumber; i++) {
-			if (batch.batchShift) {
-				srand((unsigned)time(NULL));
-				batch.simpleId = rand();
+
+			//	batch start
+
+			//	batch ini
+
+			for (int j = 0; j < batch.weightsadjust.size(); j++) {
+				for (int k = 0; k < batch.weightsadjust[j].size(); k++) {
+					batch.weightsadjust[j][k] = 0;
+				}
+				for (int k = 0; k < batch.biasadjust[j].size(); k++) {
+					batch.biasadjust[j][k] = 0;
+				}
 			}
-			for (int j = 0; j < batch.batchSize; j++, batch.simpleId++) {
+			batch.batchAccuracy = 0;
+			batch.batchTop1Accuracy = 0;
+			batch.batchTop3Accuracy = 0;
+			batch.batchTop5Accuracy = 0;
+			batch.batchCost = 0;
+
+			//	start point random
+
+
+			if (batch.batchShift) {
+				srand((unsigned)time(0));
+				batch.simpleId = rand()*rand();
+				batch.simpleId %= data.number;
+			}
+
+			for (int j = 0; j < batch.batchSize; j++, batch.simpleId++,batch.simpleId%=data.number) {
+
+				//	data input
+
 				fill_data(data, batch.simpleId);
 
-				//	forward propagation
+				//	model ini
 
+				for (int k = 0; k < hiddenLayers.size(); k++) {
+					for (int u = 0; u < hiddenLayers[k].neuronNumber; u++) {
+						hiddenLayers[k].neuronsAfterActive[u] = 0;
+					}
+				}
+
+				//	forward propagation
 				//	hiddenlayer foward
 
 				for (int k = 0; k < hiddenLayers.size(); k++) {
@@ -386,37 +496,168 @@ typedef struct model {
 					}
 					hiddenLayers[k].active();
 				}
-
 				//	outputlayer forward
 
 				for (int u = 0; u < outputLayer.neuronNumber; u++) {
 					outputLayer.neuronsAfterClassify[u] = hiddenLayers[hiddenLayers.size() - 1].neuronsValue[u];
 				}
-
-				//	calculate loss
-
 				outputLayer.classify();
-				outputLayer.loss();
-				outputLayer.accracy();
-				batch.accuracy += outputLayer.accracy;
-				batch.batchTop1Accuracy += outputLayer.Top1Accuracy;
-				batch.batchTop3Accuracy += outputLayer.Top3Accuracy;
-				batch.batchTop5Accuracy += outputLayer.Top5Accuracy;
+				
+				//	calculate gradient
 
+				gradient();
 
 				//	back propagation
+				//	hiddenlayer backward
+
+				for (int k = hiddenLayers.size() - 1; k >= 0; k--) {
+					if (hiddenLayers[k].layerType == "fullconnect") {
+
+						//	calculate weightsadjust and biasadjust 
+
+						if (k == 0) {
+							for (int u = 0; u < inputLayer.neuronNumber; u++) {
+								for (int v = 0; v < hiddenLayers[k].neuronNumber; v++) {
+									hiddenLayers[k].weightsadjust[u * hiddenLayers[k].neuronNumber + v] = inputLayer.neuronsValue[u] * hiddenLayers[k].gradientsValue[v];
+									batch.weightsadjust[k][u * hiddenLayers[k].neuronNumber + v] += hiddenLayers[k].weightsadjust[u * hiddenLayers[k].neuronNumber + v];
+								}
+							}
+							for (int u = 0; u < hiddenLayers[k].neuronNumber; u++) {
+								hiddenLayers[k].biasadjust[u] = hiddenLayers[k].gradientsValue[u];
+								batch.biasadjust[k][u] += hiddenLayers[k].biasadjust[u];
+							}
+						}
+						else {
+							for (int u = 0; u < hiddenLayers[k - 1].neuronNumber; u++) {
+								for (int v = 0; v < hiddenLayers[k].neuronNumber; v++) {
+									hiddenLayers[k].weightsadjust[u * hiddenLayers[k].neuronNumber + v] = hiddenLayers[k - 1].neuronsValue[u] * hiddenLayers[k].gradientsValue[v];	
+									batch.weightsadjust[k][u * hiddenLayers[k].neuronNumber + v] += hiddenLayers[k].weightsadjust[u * hiddenLayers[k].neuronNumber + v];
+								}
+							}
+							for (int u = 0; u < hiddenLayers[k].neuronNumber; u++) {
+								hiddenLayers[k].biasadjust[u] = hiddenLayers[k].gradientsValue[u];
+								batch.weightsadjust[k][u] += hiddenLayers[k].biasadjust[u];
+							}
+						}
+					}
+					else {
+						//	......
+					}
 
 
-				
+				}
+
+				//	calculate accuracy
+
+				outputLayer.accracy();
+				batch.accuracy(outputLayer);
 			}
+
+			//	batch end
+
+			//	adjust weights and bias
+
+			for (int j = 0; j < hiddenLayers.size(); j++) {
+				if (j == 0) {
+					for (int u = 0; u < inputLayer.neuronNumber; u++) {
+						for (int v = 0; v < hiddenLayers[j].neuronNumber; v++) {
+							batch.weightsadjust[j][u * hiddenLayers[j].neuronNumber + v] /= batch.batchSize;
+							batch.weightsadjust[j][u * hiddenLayers[j].neuronNumber + v] *= hiddenLayers[j].learningRate;
+							hiddenLayers[j].weights[u * hiddenLayers[j].neuronNumber + v] -= batch.weightsadjust[j][u * hiddenLayers[j].neuronNumber + v];
+						}
+					}
+					for (int u = 0; u < hiddenLayers[j].neuronNumber; u++) {
+						batch.biasadjust[j][u] /= batch.batchSize;
+						batch.biasadjust[j][u] *= hiddenLayers[j].learningRate;
+						hiddenLayers[j].bias[u] -= batch.biasadjust[j][u];
+					}
+				}
+				else {
+					for (int u = 0; u < hiddenLayers[j - 1].neuronNumber; u++) {
+						for (int v = 0; v < hiddenLayers[j].neuronNumber; v++) {
+							batch.weightsadjust[j][u * hiddenLayers[j].neuronNumber + v] /= batch.batchSize;
+							batch.weightsadjust[j][u * hiddenLayers[j].neuronNumber + v] *= hiddenLayers[j].learningRate;
+							hiddenLayers[j].weights[u * hiddenLayers[j].neuronNumber + v] -= batch.weightsadjust[j][u * hiddenLayers[j].neuronNumber + v];
+						}
+					}
+					for (int u = 0; u < hiddenLayers[j].neuronNumber; u++) {
+						batch.biasadjust[j][u] /= batch.batchSize;
+						batch.biasadjust[j][u] *= hiddenLayers[j].learningRate;
+						hiddenLayers[j].bias[u] -= batch.biasadjust[j][u];
+					}
+				}
+			}
+
+			//	output inf
+			//if (i % 100 == 0) {
+			//	cout << "Batch No. " << i << " Average Batch loss " << batch.batchCost / batch.batchSize << " Average Batch accuracy " << batch.batchAccuracy / batch.batchSize << endl;
+			//	for (int i = 0; i < 10; i++) {
+			//		cout << outputLayer.neuronsValue[i] << endl;
+			//	}
+			//}
 		}
+	}
 
+	void test(DataSet& data) {
+		double ok = 0;
+		for (int i = 0; i < data.number; i++) {
+			for (int j = 0; j < data.singleDataSize; j++) {
+				inputLayer.neuronsValue[j] = data.data[i * data.singleDataSize + j] / 255;
+			}
+			outputLayer.answer = data.labels[i];
+			for (int j = 0; j < outputLayer.neuronNumber; j++) {
+				outputLayer.answerVector[j] = data.labelsVector[i * data.singleLabelVectorSize + j];
+			}
+			for (int j = 0; j < hiddenLayers.size(); j++) {
+				for (int u = 0; u < hiddenLayers[j].neuronNumber; u++) {
+					hiddenLayers[j].neuronsAfterActive[u] = 0;
+				}
+			}
+			//	forward propagation
+			//	hiddenlayer foward
+			for (int j = 0; j < hiddenLayers.size(); j++) {
+				if (hiddenLayers[j].layerType == "fullconnect") {
+					if (j == 0) {
+						for (int u = 0; u < inputLayer.neuronNumber; u++) {
+							for (int v = 0; v < hiddenLayers[j].neuronNumber; v++) {
+								hiddenLayers[j].neuronsAfterActive[v] += inputLayer.neuronsValue[u] * hiddenLayers[j].weights[u * hiddenLayers[j].neuronNumber + v];
+							}
+						}
+						for (int u = 0; u < hiddenLayers[j].neuronNumber; u++) {
+							hiddenLayers[j].neuronsAfterActive[u] += hiddenLayers[j].bias[u];
+						}
+					}
+					else {
+						for (int u = 0; u < hiddenLayers[j - 1].neuronNumber; u++) {
+							for (int v = 0; v < hiddenLayers[j].neuronNumber; v++) {
+								hiddenLayers[j].neuronsAfterActive[v] += hiddenLayers[j - 1].neuronsValue[u] * hiddenLayers[j].weights[u * hiddenLayers[j].neuronNumber + v];
+							}
+						}
+						for (int u = 0; u < hiddenLayers[j].neuronNumber; u++) {
+							hiddenLayers[j].neuronsAfterActive[u] += hiddenLayers[j].bias[u];
+						}
+					}
+				}
+				else {
+					//	......
+				}
+				hiddenLayers[j].active();
+			}
+			//	outputlayer forward
 
+			for (int u = 0; u < outputLayer.neuronNumber; u++) {
+				outputLayer.neuronsAfterClassify[u] = hiddenLayers[hiddenLayers.size() - 1].neuronsValue[u];
+			}
+			outputLayer.classify();
+			outputLayer.accracy();
+			if (outputLayer.Accuracy) ok++;
+		}
+		cout << " ANN Accuracy:" << ok / data.number << endl << "Hello world";
 	}
 };
 
 
-void buildModel(model& model) {
+void buildModel(Model& model, Batch& batch) {
 	model.inputLayer = {
 		784
 	};
@@ -424,35 +665,38 @@ void buildModel(model& model) {
 		"fullconnect",
 		"sigmoid",
 		16,
-		0.1
+		3
 		});
 	model.hiddenLayers.push_back({
 		"fullconnect",
 		"sigmoid",
 		10,
-		0.1
+		3
 		});
 	model.outputLayer = {
 		"crossEntropy",
 		"softmax"
 	};
+	model.batch = batch;
 }
-void buildBatch(batch& batch) {
+void buildBatch(Batch& batch) {
 	batch = {
-		100000,
-		10,
+		3000,
+		20,
 		1
 	};
 }
-dataSet mnist;
-model myModel;
-batch myBatch;
+DataSet mnistTrain,mnistTest;
+Model myModel;
+Batch myBatch;
 int main()
 {
-	mnist.MNISTInput();
-	buildModel(myModel);
+	mnistTrain.MNISTInput("train-images.idx3-ubyte", "train-labels.idx1-ubyte");
+	mnistTest.MNISTInput("t10k-images.idx3-ubyte", "t10k-labels.idx1-ubyte");
 	buildBatch(myBatch);
+	buildModel(myModel, myBatch);
 	myModel.ini();
 	myModel.normalWB(0, 1);
-	myModel.train(mnist, myBatch);
+	myModel.train(mnistTrain);
+	myModel.test(mnistTest);
 }
