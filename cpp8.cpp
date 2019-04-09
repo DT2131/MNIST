@@ -8,7 +8,7 @@ typedef struct HiddenLayer {
 	//	data structure
 
 	int neuronNumber;
-	string layerType; 
+	string layerType;
 	string activationFunction;
 	vector <double> weights;
 	vector <double> neuronsAfterActive;
@@ -19,21 +19,23 @@ typedef struct HiddenLayer {
 	double learningRate;
 	vector <double> weightsadjust;
 	vector <double> biasadjust;
-
+	double leak;
 	//	initialization
 
 	HiddenLayer() {}
-	HiddenLayer(string _layerType, string _activationFunction, int _neuronNumber, double _learningRate) {
+	HiddenLayer(string _layerType, string _activationFunction, int _neuronNumber, double _learningRate, double _leak = 0.1) {
 		layerType = _layerType;
 		activationFunction = _activationFunction;
 		neuronNumber = _neuronNumber;
 		learningRate = _learningRate;
+		leak = _leak;
+		
 	}
 
 
 	//	activation functions
 
-	void active(int _leak = 0.1) {
+	void active() {
 		if (activationFunction == "sigmoid") {
 			for (int i = 0; i < neuronNumber; i++) {
 				neuronsValue[i] = 1.0 / (1.0 + exp(-neuronsAfterActive[i]));
@@ -44,9 +46,9 @@ typedef struct HiddenLayer {
 				neuronsValue[i] = max(neuronsAfterActive[i], 0.0);
 			}
 		}
-		else if(activationFunction == "leakyRelu") {
+		else if (activationFunction == "leakyRelu") {
 			for (int i = 0; i < neuronNumber; i++) {
-				neuronsValue[i] = neuronsAfterActive[i] * (neuronsAfterActive[i] < 0 ? _leak : 1);
+				neuronsValue[i] = neuronsAfterActive[i] * (neuronsAfterActive[i] < 0 ? leak : 1);
 			}
 		}
 		else {
@@ -74,9 +76,9 @@ typedef struct OutputLayer {
 	//	initialization
 
 	OutputLayer() {}
-	OutputLayer(string _lossFunction, string _classifier) {
-		lossFunction = _lossFunction;
+	OutputLayer(string _classifier, string _lossFunction) {
 		classifier = _classifier;
+		lossFunction = _lossFunction;
 	}
 
 	//	calculate accracy
@@ -133,20 +135,37 @@ typedef struct InputLayer {
 	int neuronNumber;
 	vector <double> neuronsValue;
 	vector <double> neuronsAfterNormalize;
-	
+	string normalization;
 	//	initialization
 
 	InputLayer() {}
-	InputLayer(int _neuronNumber) {
+	InputLayer(int _neuronNumber, string _normalization = "Null") {
 		neuronNumber = _neuronNumber;
+		normalization = _normalization;
 	}
 
 	//	noramlization
 
-	void normalize(int maximum) {
-		for (int i = 0; i < neuronNumber; i++) {
-			neuronsValue[i] = neuronsAfterNormalize[i] / maximum;
+	void normalize() {
+		if (normalization == "Null") {
+			for (int i = 0; i < neuronNumber; i++) {
+				neuronsValue[i] = neuronsAfterNormalize[i];
+			}
 		}
+		else if (normalization == "min-max") {
+			double minimum = neuronsAfterNormalize[0], maximum = neuronsAfterNormalize[0];
+			for (int i = 0; i < neuronNumber; i++) {
+				minimum = min(neuronsAfterNormalize[i], minimum);
+				maximum = max(neuronsAfterNormalize[i], maximum);
+			}
+			for (int i = 0; i < neuronNumber; i++) {
+				neuronsValue[i] = (neuronsAfterNormalize[i] - minimum) / (maximum - minimum);
+			}
+		}
+		else {
+			//	......
+		}
+		
 	}
 
 };
@@ -180,7 +199,6 @@ typedef struct Batch {
 		batchTop3Accuracy += output.Top3Accuracy;
 		batchTop5Accuracy += output.Top5Accuracy;
 	}
-
 };
 
 typedef struct DataSet {
@@ -205,7 +223,7 @@ typedef struct DataSet {
 		return ans;
 	}
 
-	void MNISTInput(const char dataDir[],const char labelsDir[]) {
+	void MNISTInput(const char dataDir[], const char labelsDir[]) {
 		ifstream icin;
 		icin.open(dataDir, ios::binary);
 		dimonsion = 2;
@@ -239,7 +257,7 @@ typedef struct Model {
 	OutputLayer outputLayer;
 	Batch batch;
 	//	initialization
-
+	
 	void ini() {
 		for (int i = 0; i < inputLayer.neuronNumber; i++) {
 			inputLayer.neuronsValue.push_back(0);
@@ -285,15 +303,15 @@ typedef struct Model {
 	//	data input
 
 	void fill_data(DataSet& data, int id) {
-		
+
 		for (int i = 0; i < data.singleDataSize; i++) {
-			inputLayer.neuronsValue[i] = data.data[id * data.singleDataSize + i] / 255;
+			inputLayer.neuronsAfterNormalize[i] = data.data[id * data.singleDataSize + i];
 		}
 		outputLayer.answer = data.labels[id];
 		for (int i = 0; i < outputLayer.neuronNumber; i++) {
 			outputLayer.answerVector[i] = data.labelsVector[id * data.singleLabelVectorSize + i];
 		}
-		
+
 	}
 
 	//	normal distribution weights and bias
@@ -332,14 +350,46 @@ typedef struct Model {
 	void saveWB(const char a[]) {
 		freopen(a, "w", stdout);
 
+		//	inputLayer
+
+		cout << "[ InputLayers ]" << endl;
+		cout << "neuronNumber" << " = " << inputLayer.neuronNumber << endl;
+		cout << "normalization" << " = " << inputLayer.normalization << endl;
+		
+		//	hiddenLayer
+
+		cout << "[ HiddenLayers ]" << endl;
+		cout << "hiddenLayers size" << " = " << hiddenLayers.size() << endl;
+		for (int i = 0; i < hiddenLayers.size(); i++) {
+			cout << "HiddenLayer" << " " << i << " " << "layerType" << " = " << hiddenLayers[i].layerType << endl;
+			cout << "HiddenLayer" << " " << i << " " << "activationFuction" << " = " << hiddenLayers[i].activationFunction << endl;
+			cout << "HiddenLayer" << " " << i << " " << "neuronNumber" << " = " << hiddenLayers[i].neuronNumber << endl;
+			cout << "HiddenLayer" << " " << i << " " << "learningRate" << " = " << hiddenLayers[i].learningRate << endl;
+			cout << "HiddenLayer" << " " << i << " " << "leak" << " = " << hiddenLayers[i].leak << endl;
+			for (int j = 0; j < hiddenLayers[i].weights.size(); j++) {
+				cout << hiddenLayers[i].weights[j] << " ";
+			}
+			cout << endl;
+			for (int j = 0; j < hiddenLayers[i].bias.size(); j++) {
+				cout << hiddenLayers[i].weights[j] << " ";
+			}
+			cout << endl;
+		}
+
+		//	outputLayer
+
+		cout << "[ OutputLayer ]" << endl;
+		cout << "classifier" << " = " << outputLayer.classifier << endl;
+		cout << "lossFunction" << " = " << outputLayer.lossFunction << endl;
+
 	}
 	//	calculate gradient
 
 	void gradient() {
-		
+
 		//	outputlayer
 		//	calculate cost and loss
-		
+
 		outputLayer.costSum = 0;
 		if (outputLayer.lossFunction == "squaredError") {
 			for (int i = 0; i < outputLayer.neuronNumber; i++) {
@@ -357,7 +407,7 @@ typedef struct Model {
 			//	......
 
 		}
-		
+
 		//	calculate gradient
 
 		if (outputLayer.classifier == "softmax") {
@@ -378,7 +428,7 @@ typedef struct Model {
 		}
 
 		//	hiddenlayer
-		
+
 		for (int i = hiddenLayers.size() - 1; i >= 0; i--) {
 
 			//	calculate loss
@@ -405,15 +455,19 @@ typedef struct Model {
 				}
 			}
 			else if (hiddenLayers[i].activationFunction == "relu") {
-				//	......
+				for (int j = 0; j < hiddenLayers[i].neuronNumber; j++) {
+					hiddenLayers[i].gradientsValue[j] = (hiddenLayers[i].neuronsAfterActive[j] > 0) * hiddenLayers[i].lossValue[j];
+				}
 			}
-			else if (hiddenLayers[i].activationFunction == "prelu") {
-				//	......
+			else if (hiddenLayers[i].activationFunction == "leakyRelu") {
+				for (int j = 0; j < hiddenLayers[i].neuronNumber; j++) {
+					hiddenLayers[i].gradientsValue[j] = (hiddenLayers[i].neuronsAfterActive[j] > 0 ? 1 : hiddenLayers[i].leak) * hiddenLayers[i].lossValue[j];
+				}
 			}
 			else {
 				//	......
 			}
-			
+
 		}
 	}
 
@@ -444,18 +498,21 @@ typedef struct Model {
 
 			//	start point random
 
-
 			if (batch.batchShift) {
 				srand((unsigned)time(0));
 				batch.simpleId = rand()*rand();
 				batch.simpleId %= data.number;
 			}
-
-			for (int j = 0; j < batch.batchSize; j++, batch.simpleId++,batch.simpleId%=data.number) {
+			
+			for (int j = 0; j < batch.batchSize; j++, batch.simpleId++, batch.simpleId %= data.number) {
 
 				//	data input
 
 				fill_data(data, batch.simpleId);
+
+				//	data normalize
+
+				inputLayer.normalize();
 
 				//	model ini
 
@@ -502,7 +559,7 @@ typedef struct Model {
 					outputLayer.neuronsAfterClassify[u] = hiddenLayers[hiddenLayers.size() - 1].neuronsValue[u];
 				}
 				outputLayer.classify();
-				
+
 				//	calculate gradient
 
 				gradient();
@@ -513,7 +570,7 @@ typedef struct Model {
 				for (int k = hiddenLayers.size() - 1; k >= 0; k--) {
 					if (hiddenLayers[k].layerType == "fullconnect") {
 
-						//	calculate weightsadjust and biasadjust 
+						//	calculate weightsadjust and biasadjust
 
 						if (k == 0) {
 							for (int u = 0; u < inputLayer.neuronNumber; u++) {
@@ -530,7 +587,7 @@ typedef struct Model {
 						else {
 							for (int u = 0; u < hiddenLayers[k - 1].neuronNumber; u++) {
 								for (int v = 0; v < hiddenLayers[k].neuronNumber; v++) {
-									hiddenLayers[k].weightsadjust[u * hiddenLayers[k].neuronNumber + v] = hiddenLayers[k - 1].neuronsValue[u] * hiddenLayers[k].gradientsValue[v];	
+									hiddenLayers[k].weightsadjust[u * hiddenLayers[k].neuronNumber + v] = hiddenLayers[k - 1].neuronsValue[u] * hiddenLayers[k].gradientsValue[v];
 									batch.weightsadjust[k][u * hiddenLayers[k].neuronNumber + v] += hiddenLayers[k].weightsadjust[u * hiddenLayers[k].neuronNumber + v];
 								}
 							}
@@ -588,13 +645,16 @@ typedef struct Model {
 				}
 			}
 
+			
 			//	output inf
-			//if (i % 100 == 0) {
-			//	cout << "Batch No. " << i << " Average Batch loss " << batch.batchCost / batch.batchSize << " Average Batch accuracy " << batch.batchAccuracy / batch.batchSize << endl;
-			//	for (int i = 0; i < 10; i++) {
-			//		cout << outputLayer.neuronsValue[i] << endl;
-			//	}
+			//if (i % 10 == 0) {
+				cout << "Batch No. " << i << " Average Batch loss " << batch.batchCost / batch.batchSize << " Average Batch accuracy " << batch.batchAccuracy / batch.batchSize << endl;
+
+				//	for (int i = 0; i < 10; i++) {
+				//		cout << outputLayer.neuronsValue[i] << endl;
+				//	}
 			//}
+			
 		}
 	}
 
@@ -652,41 +712,44 @@ typedef struct Model {
 			outputLayer.accracy();
 			if (outputLayer.Accuracy) ok++;
 		}
-		cout << " ANN Accuracy:" << ok / data.number << endl << "Hello world";
+		cout << "ANN Accuracy:" << ok / data.number << endl << endl << "Hello world !";
 	}
 };
 
 
 void buildModel(Model& model, Batch& batch) {
 	model.inputLayer = {
-		784
+		784,
+		"min-max"
 	};
 	model.hiddenLayers.push_back({
 		"fullconnect",
-		"sigmoid",
+		"leakyRelu",
 		16,
-		3
+		0.1,
+		0.5
 		});
 	model.hiddenLayers.push_back({
 		"fullconnect",
-		"sigmoid",
+		"leakyRelu",
 		10,
-		3
+		0.1,
+		0.5
 		});
 	model.outputLayer = {
-		"crossEntropy",
-		"softmax"
+		"softmax",
+		"crossEntropy"
 	};
 	model.batch = batch;
 }
 void buildBatch(Batch& batch) {
 	batch = {
-		3000,
+		10000,
 		20,
 		1
 	};
 }
-DataSet mnistTrain,mnistTest;
+DataSet mnistTrain, mnistTest;
 Model myModel;
 Batch myBatch;
 int main()
@@ -699,4 +762,5 @@ int main()
 	myModel.normalWB(0, 1);
 	myModel.train(mnistTrain);
 	myModel.test(mnistTest);
+
 }
