@@ -1,0 +1,854 @@
+#include <bits/stdc++.h>
+#include <random>
+#include <conio.h>
+#include <cuda_runtime.h>
+#include <device_launch_parameters.h>
+#include <ctime>
+using namespace std;
+__global__ void addWithCuda(long double *a, long double *b, int size) {
+	int i = threadIdx.x + blockIdx.x * blockDim.x;
+	if (i < size) {
+		a[i] += b[i];
+	}
+}
+__global__ void mulWithCuda(long double *a, long double *b, int size) {
+	int i = threadIdx.x + blockIdx.x * blockDim.x;
+	if (i < size) {
+		a[i] *= b[i];
+	}
+}
+__global__ void divideSumWithCuda(long double *a, int size, int div) {
+	int i = threadIdx.x + blockIdx.x * blockDim.x + 1;
+	if (i%div == 0) {
+		a[i - 1] += a[i - 1 - div / 2];
+	}
+}
+void gpuMul(long double *a, long double *b, int size, cudaDeviceProp device) {
+	long double *d_a, *d_b;
+	cudaMalloc((void**)&d_a, size * sizeof(long double));
+	cudaMalloc((void**)&d_b, size * sizeof(long double));
+	cudaMemcpy(d_a, a, size * sizeof(long double), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_b, b, size * sizeof(long double), cudaMemcpyHostToDevice);
+	mulWithCuda << <size / device.maxThreadsPerBlock + 1, device.maxThreadsPerBlock >> > (d_a, d_b, size);
+	cudaMemcpy(a, d_a, size * sizeof(long double), cudaMemcpyDeviceToHost);
+	cudaFree(d_a);
+	cudaFree(d_b);
+}
+long double gpuDot(long double *a, long double *b, int size, cudaDeviceProp device) {
+	double *d_a, *d_b;
+	cudaMalloc((void**)&d_a, size * sizeof(long double));
+	cudaMalloc((void**)&d_b, size * sizeof(long double));
+	cudaMemcpy(d_a, a, size * sizeof(long double), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_b, b, size * sizeof(long double), cudaMemcpyHostToDevice);
+	mulWithCuda << <size / device.maxThreadsPerBlock + 1, device.maxThreadsPerBlock >> > (d_a, d_b, size);
+	long long x = 2;
+	while (x <= size) {
+		divideSumWithCuda << <size / device.maxThreadsPerBlock + 1, device.maxThreadsPerBlock >> > (d_a, size, x);
+		x *= 2;
+	}
+	long double fans = 0;
+	long double ans;
+	int temp = size;
+	while (temp) {
+		if (temp % 2) {
+			cudaMemcpy(&ans, &d_a[size - 1], sizeof(long double), cudaMemcpyDeviceToHost);
+			fans += ans;
+			size -= size & (-size);
+		}
+		temp /= 2;
+	}
+	cudaFree(d_a);
+	cudaFree(d_b);
+	return fans;
+}
+void gpuAdd(long double *a, long double *b, int size, cudaDeviceProp device) {
+	double *d_a, *d_b;
+	cudaMalloc((void**)&d_a, size * sizeof(long double));
+	cudaMalloc((void**)&d_b, size * sizeof(long double));
+	cudaMemcpy(d_a, a, size * sizeof(long double), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_b, b, size * sizeof(long double), cudaMemcpyHostToDevice);
+	addWithCuda << <size / device.maxThreadsPerBlock + 1, device.maxThreadsPerBlock >> > (d_a, d_b, size);
+	cudaMemcpy(a, d_a, size * sizeof(long double), cudaMemcpyDeviceToHost);
+	cudaFree(d_a);
+	cudaFree(d_b);
+}
+
+typedef struct HiddenLayer {
+
+	//	data structure
+
+	int neuronNumber;
+	string layerType;
+	string activationFunction;
+	int weightSize;
+	long double* weights;
+	long double* neuronsAfterActive;
+	long double* bias;
+	long double* neuronsValue;
+	long double* lossValue;
+	long double* gradientsValue;
+	long double learningRate;
+	long double* weightsadjust;
+	long double* biasadjust;
+	long double leak;
+
+
+	//	initialization
+
+	HiddenLayer() {}
+	HiddenLayer(string _layerType, string _activationFunction, int _neuronNumber, long double _learningRate, long double _leak = 0.1) {
+		layerType = _layerType;
+		activationFunction = _activationFunction;
+		neuronNumber = _neuronNumber;
+		learningRate = _learningRate;
+		leak = _leak;
+
+	}
+
+	//	activation functions
+
+	void active() {
+		if (activationFunction == "sigmoid") {
+			for (int i = 0; i < neuronNumber; i++) {
+				neuronsValue[i] = 1.0 / (1.0 + exp(-neuronsAfterActive[i]));
+			}
+		}
+		else if (activationFunction == "relu") {
+			for (int i = 0; i < neuronNumber; i++) {
+				neuronsValue[i] = max(neuronsAfterActive[i], (long double)0.0);
+			}
+		}
+		else if (activationFunction == "leakyRelu") {
+			for (int i = 0; i < neuronNumber; i++) {
+				neuronsValue[i] = neuronsAfterActive[i] * (neuronsAfterActive[i] < 0 ? leak : 1);
+			}
+		}
+		else {
+			//	.......
+		}
+	}
+};
+
+typedef struct OutputLayer {
+	int neuronNumber;
+	string lossFunction;
+	string classifier;
+	long double* neuronsAfterClassify;
+	long double* neuronsValue;
+	long double* lossValue;
+	long double* gradientsValue;
+	long double costSum;
+	long double answer;
+	long double* answerVector;
+	long double Accuracy;
+	long double Top1Accuracy;
+	long double Top3Accuracy;
+	long double Top5Accuracy;
+
+	//	initialization
+
+	OutputLayer() {}
+	OutputLayer(string _classifier, string _lossFunction) {
+		classifier = _classifier;
+		lossFunction = _lossFunction;
+	}
+
+	//	calculate accracy
+
+	void accracy() {
+		Accuracy = 0;
+		Top1Accuracy = 0;
+		Top3Accuracy = 0;
+		Top5Accuracy = 0;
+		vector<pair<long double, int> >outputs;
+		for (int i = 0; i < neuronNumber; i++) {
+			outputs.push_back({ neuronsValue[i],i });
+		}
+		sort(outputs.begin(), outputs.end());
+		if (outputs[neuronNumber - 1].second == answer) {
+			Accuracy = 1;
+		}
+		for (int i = neuronNumber - 1; i >= 0; i--) {
+			if (outputs[i].second == answer) {
+				if (i >= (neuronNumber - neuronNumber * 0.1)) {
+					Top1Accuracy = 1;
+				}
+				if (i >= (neuronNumber - neuronNumber * 0.3)) {
+					Top3Accuracy = 1;
+				}
+				if (i >= (neuronNumber - neuronNumber * 0.5)) {
+					Top5Accuracy = 1;
+					break;
+				}
+			}
+		}
+	}
+
+	//	classify
+
+	void classify() {
+		if (classifier == "softmax") {
+			long double sum = 0;
+			for (int i = 0; i < neuronNumber; i++) {
+				neuronsValue[i] = exp(neuronsAfterClassify[i]);
+				sum += neuronsValue[i];
+			}
+			for (int i = 0; i < neuronNumber; i++) {
+				neuronsValue[i] /= sum;
+			}
+		}
+		else {
+			//	......
+		}
+	}
+};
+
+typedef struct InputLayer {
+	int neuronNumber;
+	long double *neuronsValue;
+	long double *neuronsAfterNormalize;
+	string normalization;
+	//	initialization
+
+	InputLayer() {}
+	InputLayer(int _neuronNumber, string _normalization = "Null") {
+		neuronNumber = _neuronNumber;
+		normalization = _normalization;
+	}
+
+	//	noramlization
+
+	void normalize() {
+		if (normalization == "Null") {
+			for (int i = 0; i < neuronNumber; i++) {
+				neuronsValue[i] = neuronsAfterNormalize[i];
+			}
+		}
+		else if (normalization == "min-max") {
+			long double minimum = neuronsAfterNormalize[0], maximum = neuronsAfterNormalize[0];
+			for (int i = 0; i < neuronNumber; i++) {
+				minimum = min(neuronsAfterNormalize[i], minimum);
+				maximum = max(neuronsAfterNormalize[i], maximum);
+			}
+			for (int i = 0; i < neuronNumber; i++) {
+				neuronsValue[i] = (neuronsAfterNormalize[i] - minimum) / (maximum - minimum);
+			}
+		}
+		else if(normalization == "log"){
+			long double maximum = neuronsAfterNormalize[0];
+			for (int i = 0; i < neuronNumber; i++) {
+				maximum = max(neuronsAfterNormalize[i], maximum);
+			}
+			for (int i = 0; i < neuronNumber; i++) {
+				neuronsValue[i] = log(neuronsAfterNormalize[i]) / log(maximum);
+			}
+		}
+		else {
+			//	......
+		}
+	}
+};
+
+typedef struct Batch {
+	int batchSize;
+	int batchNumber;
+	long double **weightsadjust;
+	long double **biasadjust;
+	long double batchAccuracy;
+	long double batchTop1Accuracy;
+	long double batchTop3Accuracy;
+	long double batchTop5Accuracy;
+	long double batchCost;
+	bool batchShift;
+	int simpleId;
+	//	initialization
+
+	Batch() {}
+	Batch(int _batchNumber, int _batchSize, bool _batchShift = 0) {
+		batchNumber = _batchNumber;
+		batchSize = _batchSize;
+		batchShift = _batchShift;
+		simpleId = 0;
+	}
+
+	void accuracy(OutputLayer& output) {
+		batchCost += output.costSum;
+		batchAccuracy += output.Accuracy;
+		batchTop1Accuracy += output.Top1Accuracy;
+		batchTop3Accuracy += output.Top3Accuracy;
+		batchTop5Accuracy += output.Top5Accuracy;
+	}
+};
+
+typedef struct DataSet {
+	int number;
+	int dimonsion;
+	int checker;
+	int singleDataSize;
+	int singleLabelVectorSize;
+	vector <int> size;
+	long double *data;
+	long double *labels;
+	long double *labelsVector;
+	unsigned int in(ifstream& icin, unsigned int size) {
+		unsigned int ans = 0;
+		for (int i = 0; i < size; i++) {
+			unsigned char x;
+			icin.read((char*)&x, 1);
+			unsigned int temp = x;
+			ans <<= 8;
+			ans += temp;
+		}
+		return ans;
+	}
+
+	void MNISTInput(const char dataDir[], const char labelsDir[]) {
+		ifstream icin;
+		icin.open(dataDir, ios::binary);
+		dimonsion = 2;
+		checker = in(icin, 4), number = in(icin, 4), size.push_back(in(icin, 4)), size.push_back(in(icin, 4));
+		data = (long double*)malloc(number * size[0] * size[1] * sizeof(long double));
+		for (int i = 0; i < number; i++) {
+			for (int x = 0; x < size[0]; x++) {
+				for (int y = 0; y < size[1]; y++) {
+					data[i * size[0] * size[1] + x * size[1] + y] = in(icin, 1);
+				}
+			}
+		}
+		singleDataSize = size[0] * size[1];
+		icin.close();
+		icin.open(labelsDir, ios::binary);
+		checker = in(icin, 4), number = in(icin, 4);
+		labels = (long double*)malloc(number * sizeof(long double));
+		labelsVector = (long double*)malloc(number * 10 * sizeof(long double));
+		for (int i = 0; i < number; i++) {
+			int temp = in(icin, 1);
+			labels[i] = temp;
+			for (int j = 0; j < temp; j++) labelsVector[i * 10 + j] = 0;
+			labelsVector[i * 10 + temp] = 1;
+			for (int j = temp + 1; j < 10; j++) labelsVector[i * 10 + j] = 0;
+		}
+		singleLabelVectorSize = 10;
+	}
+};
+
+typedef struct Model {
+
+	InputLayer inputLayer;
+	vector <HiddenLayer> hiddenLayers;
+	OutputLayer outputLayer;
+	Batch batch;
+	//	initialization
+
+	void ini() {
+		inputLayer.neuronsValue = (long double*)malloc(inputLayer.neuronNumber * sizeof(long double));
+		inputLayer.neuronsAfterNormalize = (long double*)malloc(inputLayer.neuronNumber * sizeof(long double));
+		for (int i = 0; i < hiddenLayers.size(); i++) {
+			hiddenLayers[i].neuronsValue = (long double*)malloc(hiddenLayers[i].neuronNumber * sizeof(long double));
+			hiddenLayers[i].neuronsAfterActive = (long double*)malloc(hiddenLayers[i].neuronNumber * sizeof(long double));
+			hiddenLayers[i].bias = (long double*)malloc(hiddenLayers[i].neuronNumber * sizeof(long double));
+			hiddenLayers[i].biasadjust = (long double*)malloc(hiddenLayers[i].neuronNumber * sizeof(long double));
+			hiddenLayers[i].gradientsValue = (long double*)malloc(hiddenLayers[i].neuronNumber * sizeof(long double));
+			hiddenLayers[i].lossValue = (long double*)malloc(hiddenLayers[i].neuronNumber * sizeof(long double));
+			if (i == 0) {
+				hiddenLayers[i].weightSize = hiddenLayers[i].neuronNumber * inputLayer.neuronNumber;
+			}
+			else {
+				hiddenLayers[i].weightSize = hiddenLayers[i].neuronNumber * hiddenLayers[i - 1].neuronNumber;
+			}
+			hiddenLayers[i].weights = (long double*)malloc(hiddenLayers[i].weightSize * sizeof(long double));
+			hiddenLayers[i].weightsadjust = (long double*)malloc(hiddenLayers[i].weightSize * sizeof(long double));
+		}
+		batch.weightsadjust = (long double**)malloc(hiddenLayers.size() * sizeof(long double*));
+		for (int i = 0; i < hiddenLayers.size(); i++) {
+			batch.weightsadjust[i] = (long double*)malloc(hiddenLayers[i].weightSize * sizeof(long double));
+		}
+		batch.biasadjust = (long double**)malloc(hiddenLayers.size() * sizeof(long double*));
+		for (int i = 0; i < hiddenLayers.size(); i++) {
+			batch.biasadjust[i] = (long double*)malloc(hiddenLayers[i].neuronNumber * sizeof(long double));
+		}
+
+		outputLayer.neuronNumber = hiddenLayers[hiddenLayers.size() - 1].neuronNumber;
+		outputLayer.neuronsValue = (long double*)malloc(outputLayer.neuronNumber * sizeof(long double));
+		outputLayer.neuronsAfterClassify = (long double*)malloc(outputLayer.neuronNumber * sizeof(long double));
+		outputLayer.answerVector = (long double*)malloc(outputLayer.neuronNumber * sizeof(long double));
+		outputLayer.lossValue = (long double*)malloc(outputLayer.neuronNumber * sizeof(long double));
+		outputLayer.gradientsValue = (long double*)malloc(outputLayer.neuronNumber * sizeof(long double));
+
+
+	}
+
+	//	data input
+
+	void fill_data(DataSet& data, int id) {
+		for (int i = 0; i < data.singleDataSize; i++) {
+			inputLayer.neuronsAfterNormalize[i] = data.data[id * data.singleDataSize + i];
+		}
+		outputLayer.answer = data.labels[id];
+		for (int i = 0; i < outputLayer.neuronNumber; i++) {
+			outputLayer.answerVector[i] = data.labelsVector[id * data.singleLabelVectorSize + i];
+		}
+
+	}
+
+	//	normal distribution weights and bias
+
+	void normalWB(int u, int o) {
+		default_random_engine e(rand());
+		normal_distribution<long double> normal(u, o);
+		for (int i = 0; i < hiddenLayers.size(); i++) {
+			for (int j = 0; j < hiddenLayers[i].neuronNumber; j++) {
+				hiddenLayers[i].bias[j] = normal(e);
+				hiddenLayers[i].biasadjust[j] = normal(e);
+			}
+			if (i == 0) {
+				for (int j = 0; j < hiddenLayers[i].neuronNumber*inputLayer.neuronNumber; j++) {
+					hiddenLayers[i].weights[j] = normal(e);
+					hiddenLayers[i].weightsadjust[j] = normal(e);
+				}
+			}
+			else {
+				for (int j = 0; j < hiddenLayers[i].neuronNumber*hiddenLayers[i - 1].neuronNumber; j++) {
+					hiddenLayers[i].weights[j] = normal(e);
+					hiddenLayers[i].weightsadjust[j] = normal(e);
+				}
+			}
+		}
+	}
+
+	//	load weights and bias
+
+	void loadWB(string dir) {
+
+	}
+
+	//	save weights and bias
+
+	void saveWB(const char a[]) {
+		freopen(a, "w", stdout);
+
+		//	inputLayer
+
+		cout << "[ InputLayers ]" << endl;
+		cout << "neuronNumber" << " = " << inputLayer.neuronNumber << endl;
+		cout << "normalization" << " = " << inputLayer.normalization << endl;
+
+		//	hiddenLayer
+
+		cout << "[ HiddenLayers ]" << endl;
+		cout << "hiddenLayers size" << " = " << hiddenLayers.size() << endl;
+		for (int i = 0; i < hiddenLayers.size(); i++) {
+			cout << "HiddenLayer" << " " << i << " " << "layerType" << " = " << hiddenLayers[i].layerType << endl;
+			cout << "HiddenLayer" << " " << i << " " << "activationFuction" << " = " << hiddenLayers[i].activationFunction << endl;
+			cout << "HiddenLayer" << " " << i << " " << "neuronNumber" << " = " << hiddenLayers[i].neuronNumber << endl;
+			cout << "HiddenLayer" << " " << i << " " << "learningRate" << " = " << hiddenLayers[i].learningRate << endl;
+			cout << "HiddenLayer" << " " << i << " " << "leak" << " = " << hiddenLayers[i].leak << endl;
+			for (int j = 0; j < hiddenLayers[i].weightSize; j++) {
+				cout << hiddenLayers[i].weights[j] << " ";
+			}
+			cout << endl;
+			for (int j = 0; j < hiddenLayers[i].neuronNumber; j++) {
+				cout << hiddenLayers[i].bias[j] << " ";
+			}
+			cout << endl;
+		}
+
+		//	outputLayer
+
+		cout << "[ OutputLayer ]" << endl;
+		cout << "classifier" << " = " << outputLayer.classifier << endl;
+		cout << "lossFunction" << " = " << outputLayer.lossFunction << endl;
+
+	}
+	//	calculate gradient
+
+	void gradient() {
+
+		//	outputlayer
+		//	calculate cost and loss
+
+		outputLayer.costSum = 0;
+		if (outputLayer.lossFunction == "squaredError") {
+			for (int i = 0; i < outputLayer.neuronNumber; i++) {
+				outputLayer.costSum += (outputLayer.neuronsValue[i] - outputLayer.answerVector[i]) * (outputLayer.neuronsValue[i] - outputLayer.answerVector[i]);
+				outputLayer.lossValue[i] = 2 * (outputLayer.neuronsValue[i] - outputLayer.answerVector[i]);
+			}
+		}
+		else if (outputLayer.lossFunction == "crossEntropy") {
+			for (int i = 0; i < outputLayer.neuronNumber; i++) {
+				outputLayer.costSum += -outputLayer.answerVector[i] * log(outputLayer.neuronsValue[i]);
+				outputLayer.lossValue[i] = -outputLayer.answerVector[i] / outputLayer.neuronsValue[i];
+			}
+		}
+		else {
+			//	......
+
+		}
+
+		//	calculate gradient
+
+		if (outputLayer.classifier == "softmax") {
+			for (int i = 0; i < outputLayer.neuronNumber; i++) {
+				outputLayer.gradientsValue[i] = 0;
+				for (int j = 0; j < outputLayer.neuronNumber; j++) {
+					if (i == j) {
+						outputLayer.gradientsValue[i] += outputLayer.neuronsValue[i] * (1 - outputLayer.neuronsValue[i]) * outputLayer.lossValue[i];
+					}
+					else {
+						outputLayer.gradientsValue[i] += (-outputLayer.neuronsValue[j] * outputLayer.neuronsValue[i]) * outputLayer.lossValue[j];
+					}
+
+				}
+			}
+		}
+		else {
+			//	......
+		}
+
+		//	hiddenlayer
+
+		for (int i = hiddenLayers.size() - 1; i >= 0; i--) {
+
+			//	calculate loss
+
+			if (i == hiddenLayers.size() - 1) {
+				for (int u = 0; u < hiddenLayers[i].neuronNumber; u++) {
+					hiddenLayers[i].lossValue[u] = outputLayer.gradientsValue[u];
+				}
+			}
+			else {
+				for (int u = 0; u < hiddenLayers[i].neuronNumber; u++) {
+					hiddenLayers[i].lossValue[u] = 0;
+					for (int v = 0; v < hiddenLayers[i + 1].neuronNumber; v++) {
+						hiddenLayers[i].lossValue[u] += hiddenLayers[i + 1].weights[u * hiddenLayers[i + 1].neuronNumber + v] * hiddenLayers[i + 1].gradientsValue[v];
+					}
+				}
+			}
+			//	calculate gradient
+			if (hiddenLayers[i].activationFunction == "sigmoid") {
+				for (int j = 0; j < hiddenLayers[i].neuronNumber; j++) {
+					hiddenLayers[i].gradientsValue[j] = hiddenLayers[i].neuronsValue[j] * (1 - hiddenLayers[i].neuronsValue[j]) * hiddenLayers[i].lossValue[j];
+				}
+			}
+			else if (hiddenLayers[i].activationFunction == "relu") {
+				for (int j = 0; j < hiddenLayers[i].neuronNumber; j++) {
+					hiddenLayers[i].gradientsValue[j] = (hiddenLayers[i].neuronsAfterActive[j] > 0) * hiddenLayers[i].lossValue[j];
+				}
+			}
+			else if (hiddenLayers[i].activationFunction == "leakyRelu") {
+				for (int j = 0; j < hiddenLayers[i].neuronNumber; j++) {
+					hiddenLayers[i].gradientsValue[j] = (hiddenLayers[i].neuronsAfterActive[j] > 0 ? 1 : hiddenLayers[i].leak) * hiddenLayers[i].lossValue[j];
+				}
+			}
+			else {
+				//	......
+			}
+
+		}
+	}
+
+
+
+	//	train
+
+	void train(DataSet& data, cudaDeviceProp device) {
+		for (int i = 0; i < batch.batchNumber; i++) {
+
+			//	batch start
+
+			//	batch ini
+
+			for (int i = 0; i < hiddenLayers.size(); i++) {
+				for (int j = 0; j < hiddenLayers[i].weightSize; j++) {
+					batch.weightsadjust[i][j] = 0;
+				}
+				for (int j = 0; j < hiddenLayers[i].neuronNumber; j++) {
+					batch.biasadjust[i][j] = 0;
+				}
+			}
+
+			batch.batchAccuracy = 0;
+			batch.batchTop1Accuracy = 0;
+			batch.batchTop3Accuracy = 0;
+			batch.batchTop5Accuracy = 0;
+			batch.batchCost = 0;
+
+			//	start point random
+
+			if (batch.batchShift) {
+				srand((unsigned)time(0));
+				batch.simpleId = rand()*rand();
+				batch.simpleId %= data.number;
+			}
+
+			for (int j = 0; j < batch.batchSize; j++, batch.simpleId++, batch.simpleId %= data.number) {
+
+				//	data input
+
+				fill_data(data, batch.simpleId);
+
+				//	data normalize
+
+				inputLayer.normalize();
+
+				//	model ini
+
+				for (int k = 0; k < hiddenLayers.size(); k++) {
+					for (int u = 0; u < hiddenLayers[k].neuronNumber; u++) {
+						hiddenLayers[k].neuronsAfterActive[u] = 0;
+					}
+				}
+
+				//	forward propagation
+				//	hiddenlayer foward
+
+				for (int k = 0; k < hiddenLayers.size(); k++) {
+					if (hiddenLayers[k].layerType == "fullconnect") {
+						if (k == 0) {
+
+							
+							for (int u = 0; u < inputLayer.neuronNumber; u++) {
+								for (int v = 0; v < hiddenLayers[k].neuronNumber; v++) {
+									hiddenLayers[k].neuronsAfterActive[v] += inputLayer.neuronsValue[u] * hiddenLayers[k].weights[u * hiddenLayers[k].neuronNumber + v];
+								}
+							}
+							for (int u = 0; u < hiddenLayers[k].neuronNumber; u++) {
+								hiddenLayers[k].neuronsAfterActive[u] += hiddenLayers[k].bias[u];
+							}
+						}
+						else {
+							for (int u = 0; u < hiddenLayers[k - 1].neuronNumber; u++) {
+								for (int v = 0; v < hiddenLayers[k].neuronNumber; v++) {
+									hiddenLayers[k].neuronsAfterActive[v] += hiddenLayers[k - 1].neuronsValue[u] * hiddenLayers[k].weights[u * hiddenLayers[k].neuronNumber + v];
+								}
+							}
+							for (int u = 0; u < hiddenLayers[k].neuronNumber; u++) {
+								hiddenLayers[k].neuronsAfterActive[u] += hiddenLayers[k].bias[u];
+							}
+						}
+					}
+					else {
+						//	......
+					}
+					hiddenLayers[k].active();
+				}
+				//	outputlayer forward
+
+				for (int u = 0; u < outputLayer.neuronNumber; u++) {
+					outputLayer.neuronsAfterClassify[u] = hiddenLayers[hiddenLayers.size() - 1].neuronsValue[u];
+				}
+				outputLayer.classify();
+
+				//	calculate gradient
+
+				gradient();
+
+
+				//	back propagation
+				//	hiddenlayer backward
+
+				for (int k = hiddenLayers.size() - 1; k >= 0; k--) {
+					if (hiddenLayers[k].layerType == "fullconnect") {
+
+						//	calculate weightsadjust and biasadjust
+
+						if (k == 0) {
+							for (int u = 0; u < inputLayer.neuronNumber; u++) {
+								for (int v = 0; v < hiddenLayers[k].neuronNumber; v++) {
+									hiddenLayers[k].weightsadjust[u * hiddenLayers[k].neuronNumber + v] = inputLayer.neuronsValue[u] * hiddenLayers[k].gradientsValue[v];
+									batch.weightsadjust[k][u * hiddenLayers[k].neuronNumber + v] += hiddenLayers[k].weightsadjust[u * hiddenLayers[k].neuronNumber + v];
+								}
+							}
+							for (int u = 0; u < hiddenLayers[k].neuronNumber; u++) {
+								hiddenLayers[k].biasadjust[u] = hiddenLayers[k].gradientsValue[u];
+								batch.biasadjust[k][u] += hiddenLayers[k].biasadjust[u];
+							}
+						}
+						else {
+							for (int u = 0; u < hiddenLayers[k - 1].neuronNumber; u++) {
+								for (int v = 0; v < hiddenLayers[k].neuronNumber; v++) {
+									hiddenLayers[k].weightsadjust[u * hiddenLayers[k].neuronNumber + v] = hiddenLayers[k - 1].neuronsValue[u] * hiddenLayers[k].gradientsValue[v];
+									batch.weightsadjust[k][u * hiddenLayers[k].neuronNumber + v] += hiddenLayers[k].weightsadjust[u * hiddenLayers[k].neuronNumber + v];
+
+								}
+							}
+							for (int u = 0; u < hiddenLayers[k].neuronNumber; u++) {
+								hiddenLayers[k].biasadjust[u] = hiddenLayers[k].gradientsValue[u];
+								batch.weightsadjust[k][u] += hiddenLayers[k].biasadjust[u];
+							}
+						}
+
+					}
+					else {
+						//	......
+					}
+
+
+				}
+
+				//	calculate accuracy
+
+				outputLayer.accracy();
+
+
+				batch.accuracy(outputLayer);
+			}
+
+			//	batch end
+
+			//	adjust weights and bias
+
+			for (int j = 0; j < hiddenLayers.size(); j++) {
+				if (j == 0) {
+					for (int u = 0; u < inputLayer.neuronNumber; u++) {
+						for (int v = 0; v < hiddenLayers[j].neuronNumber; v++) {
+							batch.weightsadjust[j][u * hiddenLayers[j].neuronNumber + v] /= batch.batchSize;
+							batch.weightsadjust[j][u * hiddenLayers[j].neuronNumber + v] *= hiddenLayers[j].learningRate;
+							hiddenLayers[j].weights[u * hiddenLayers[j].neuronNumber + v] -= batch.weightsadjust[j][u * hiddenLayers[j].neuronNumber + v];
+
+
+						}
+					}
+					for (int u = 0; u < hiddenLayers[j].neuronNumber; u++) {
+						batch.biasadjust[j][u] /= batch.batchSize;
+						batch.biasadjust[j][u] *= hiddenLayers[j].learningRate;
+						hiddenLayers[j].bias[u] -= batch.biasadjust[j][u];
+					}
+				}
+				else {
+					for (int u = 0; u < hiddenLayers[j - 1].neuronNumber; u++) {
+						for (int v = 0; v < hiddenLayers[j].neuronNumber; v++) {
+							batch.weightsadjust[j][u * hiddenLayers[j].neuronNumber + v] /= batch.batchSize;
+							batch.weightsadjust[j][u * hiddenLayers[j].neuronNumber + v] *= hiddenLayers[j].learningRate;
+							hiddenLayers[j].weights[u * hiddenLayers[j].neuronNumber + v] -= batch.weightsadjust[j][u * hiddenLayers[j].neuronNumber + v];
+
+						}
+					}
+					for (int u = 0; u < hiddenLayers[j].neuronNumber; u++) {
+						batch.biasadjust[j][u] /= batch.batchSize;
+						batch.biasadjust[j][u] *= hiddenLayers[j].learningRate;
+						hiddenLayers[j].bias[u] -= batch.biasadjust[j][u];
+					}
+				}
+			}
+			if (i % 1000 == 0)
+				cout << "Batch No. " << i << " Average Batch loss " << batch.batchCost / batch.batchSize << " Average Batch accuracy " << batch.batchAccuracy / batch.batchSize << endl;
+		}
+
+	}
+
+	void test(DataSet& data) {
+		long double ok = 0;
+		for (int i = 0; i < data.number; i++) {
+			for (int j = 0; j < data.singleDataSize; j++) {
+				inputLayer.neuronsValue[j] = data.data[i * data.singleDataSize + j] / 255;
+			}
+			outputLayer.answer = data.labels[i];
+			for (int j = 0; j < outputLayer.neuronNumber; j++) {
+				outputLayer.answerVector[j] = data.labelsVector[i * data.singleLabelVectorSize + j];
+			}
+			for (int j = 0; j < hiddenLayers.size(); j++) {
+				for (int u = 0; u < hiddenLayers[j].neuronNumber; u++) {
+					hiddenLayers[j].neuronsAfterActive[u] = 0;
+				}
+			}
+			//	forward propagation
+			//	hiddenlayer foward
+			for (int j = 0; j < hiddenLayers.size(); j++) {
+				if (hiddenLayers[j].layerType == "fullconnect") {
+					if (j == 0) {
+						for (int u = 0; u < inputLayer.neuronNumber; u++) {
+							for (int v = 0; v < hiddenLayers[j].neuronNumber; v++) {
+								hiddenLayers[j].neuronsAfterActive[v] += inputLayer.neuronsValue[u] * hiddenLayers[j].weights[u * hiddenLayers[j].neuronNumber + v];
+							}
+						}
+						for (int u = 0; u < hiddenLayers[j].neuronNumber; u++) {
+							hiddenLayers[j].neuronsAfterActive[u] += hiddenLayers[j].bias[u];
+						}
+					}
+					else {
+						for (int u = 0; u < hiddenLayers[j - 1].neuronNumber; u++) {
+							for (int v = 0; v < hiddenLayers[j].neuronNumber; v++) {
+								hiddenLayers[j].neuronsAfterActive[v] += hiddenLayers[j - 1].neuronsValue[u] * hiddenLayers[j].weights[u * hiddenLayers[j].neuronNumber + v];
+							}
+						}
+						for (int u = 0; u < hiddenLayers[j].neuronNumber; u++) {
+							hiddenLayers[j].neuronsAfterActive[u] += hiddenLayers[j].bias[u];
+						}
+					}
+				}
+				else {
+					//	......
+				}
+				hiddenLayers[j].active();
+			}
+			//	outputlayer forward
+
+			for (int u = 0; u < outputLayer.neuronNumber; u++) {
+				outputLayer.neuronsAfterClassify[u] = hiddenLayers[hiddenLayers.size() - 1].neuronsValue[u];
+			}
+			outputLayer.classify();
+			outputLayer.accracy();
+			if (outputLayer.Accuracy) ok++;
+		}
+		cout << "ANN Accuracy:" << ok / data.number << endl << endl << "Hello world !";
+
+
+	}
+};
+
+void buildModel(Model& model, Batch& batch) {
+	model.inputLayer = {
+		784,
+		"min-max"
+	};
+	model.hiddenLayers.push_back({
+		"fullconnect",
+		"sigmoid",
+		200,
+		0.1,
+		0.5
+		});
+	model.hiddenLayers.push_back({
+		"fullconnect",
+		"sigmoid",
+		16,
+		0.1,
+		0.5
+		});
+	model.hiddenLayers.push_back({
+		"fullconnect",
+		"sigmoid",
+		10,
+		0.1,
+		0.5
+		});
+	model.outputLayer = {
+		"softmax",
+		"crossEntropy"
+	};
+	model.batch = batch;
+}
+void buildBatch(Batch& batch) {
+	batch = {
+		100000,
+		20,
+		1
+	};
+}
+DataSet mnistTrain, mnistTest;
+Model myModel;
+Batch myBatch;
+int main()
+{
+	cudaDeviceProp device;
+	cudaGetDeviceProperties(&device, 0);
+	mnistTrain.MNISTInput("train-images.idx3-ubyte", "train-labels.idx1-ubyte");
+	mnistTest.MNISTInput("t10k-images.idx3-ubyte", "t10k-labels.idx1-ubyte");
+	buildBatch(myBatch);
+	buildModel(myModel, myBatch);
+	myModel.ini();
+	myModel.normalWB(0, 1);
+	myModel.train(mnistTrain, device);
+	myModel.test(mnistTest);
+}
